@@ -1,0 +1,216 @@
+  //concociendola resitencia de la estufa donde disipar la energía.
+  
+  #include "EmonLib.h"     // Include Emon Library (para el calculo de la potencia
+  #include <TFT.h>         // Arduino LCD library
+  #include <SPI.h>
+  EnergyMonitor emon1;     // Create an instance
+  
+  // pin definition for the Uno
+  #define cs   10
+  #define dc   9
+  #define rst  8
+  
+  // create an instance of the library
+  TFT TFTscreen = TFT(cs, dc, rst);
+  
+  // matriz de caracteres a imprimir a la pantalla
+  char PPrintout[10];
+  char VPrintout[10];
+  char IPrintout[10];
+  float realPower;
+  long a = 0; //  para imprimir en pantalla cada cierto tiempo
+  long cont_rele=1001; //definir contador de tiempo del rele
+  float borra_p; // para borrar el la pontecia escrita
+  float borra_v;
+  float borra_i;
+  
+  //REGULACION DE POTENCIA
+  //const int analogInPin = A0;  // Analog input pin that the potentiometer is attached to
+  const int analogOutPin = 3; // Analog output pin para el PWM
+  
+  //int sensorValue = 0;      // value read from the pot
+  int outputPWM = 0;        // value output to the PWM (analog out)
+  float resistencia = 84.6;     // Resistencia de la estufa 84,6 Ohomios
+  float Pc = 0;                 // diferencia entre potencia medidad
+  float Pr=230*230/resistencia; // potencia de la estufa inicial
+  float Pwm=0;                // potencia a disipar
+  
+  void setup()
+  {
+   pinMode(2,OUTPUT);  // Conecta Rele de tensión
+   pinMode(5,OUTPUT);  // enciende Led de inyección y compensación
+   pinMode(6,OUTPUT);  // enciende Led de estamos Saturando la estufa.
+    
+    //* CAMBIA LA FRECUENCIA DE PWM (pines 3 y 11)
+    //  Frecuencia = Frecuencia Reloj / (2* prescaler* 255).
+    //  Frecuencia = 16.000.000 / (2 * 1* 255). = 31,37 KHz
+    //  Frecuencia = 16.000.000 / (2 * 8* 255). = 3,9 KHz
+    //TCCR2A = 0x81; // seleccion del contador.
+    //TCCR2B = 0x01; // prescaler = 01=1, 02=8, 03.
+    //OCR2A = 255;   // tope de la señal o maximo pwm
+    //OCR2B = 50;   // tope de la señal o maximo pwm
+    //TIMSK2 = 0;   //des habilita cualquier interrupcion que
+    //pueda haber para evitar posibles conflictos.
+    
+    TCCR2A = _BV(COM2A1) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20); // modo PWM fast
+    TCCR2B = _BV(CS21);  //prescaler a 8   
+    // Fast_PWM_frequency = (16 000 000) / (Prescale_factor * 256); =7.812 Hz
+    
+    
+    // Serial.begin(9600); // iniciar puerto serie
+  
+    // CALIBRAR LAS LECTURAS DE TENSIÓN DE INTENSIDAD
+    emon1.voltage(2, 274, 1); // Voltage: input pin, calibration, phase_shift
+    emon1.current(1, 22.27);      // Current: input pin, calibration.
+  
+    // INICIAR LA PANTALLA TFT
+    // Ponga esta línea al principio de cada dibujo que utiliza el GLCD:
+    TFTscreen.begin();
+    // borrar la pantalla con un fondo negro
+    TFTscreen.background(0, 0, 0);
+    // Escribir el texto estático a la pantalla
+    // Establecer el color de fuente a blanco
+    TFTscreen.stroke(255, 255, 255);
+    // set the font size
+    TFTscreen.setTextSize(2);
+    // write the text to the top left corner of the screen
+    TFTscreen.text("Medicion :\n ", 0, 0);
+    // establece el tamaño de fuente muy grande para el bucle
+    TFTscreen.setTextSize(3);
+  }
+  
+  void loop()
+  {
+ // CALCULO DELA POTENCIA
+    emon1.calcVI(20, 1000); // Calculate all. No.of half wavelengths (crossings), time-out
+    //emon1.serialprint();   // Print out all variables (realpower, apparent power, Vrms, Irms, power factor)
+    float realPower       = emon1.realPower;        //extract Real Power into variable
+    float apparentPower   = emon1.apparentPower;    //extract Apparent Power into variable
+    float powerFactor     = emon1.powerFactor;      //extract Power Factor into Variable
+    float Vrms            = emon1.Vrms;             //extract Vrms into Variable
+    float Irms            = emon1.Irms;             //extract Irms into Variable
+  
+     
+ //REGULACION DE POTENCIA
+    Pr = Vrms * Vrms / resistencia; // potencia máxima de la estufa
+    //Pc = realPower - Pwm; // potencia casa = P mediada - Potencia enviada a la resistencia
+    if ((realPower+Pwm) <=-1){         // si la Potencia de casa es menor de cero estamos inyectando
+                                      // pongo -1w para dar una margen
+        Pwm=-1*realPower + Pwm;
+        digitalWrite(5,HIGH);  // Led estamos inyectado
+        digitalWrite(2,HIGH);  // Conectamos rele de la etapa de Potencia
+        cont_rele=0;          // iniciamos temporizador de conexión del rele.
+        }
+    else                 // podemos estar inyectando
+       if (Pwm>0){      // bajar potencia derivada a la estufa
+           Pwm=Pwm-realPower;
+           digitalWrite(5,HIGH);  // Led estamos inyectado
+           digitalWrite(2,HIGH);  // Conectamos rele de la etapa de Potencia
+           cont_rele=0;          // iniciamos temporizador de conexión del rele.
+           }
+        else {          // potencia de casa superior a la inyectada
+            Pwm=0;
+            digitalWrite (5,LOW); // NO INYECTAMOS
+            }
+            
+     cont_rele=cont_rele+1;
+     if (cont_rele > 100){
+         digitalWrite(2,LOW);  // Desconectamos rele de la etapa de Potencia
+         cont_rele=101;      // para que no desborde la variable
+         } 
+    
+     if (Pwm > Pr){       // si la potencia que vamos a enviar es mayor que la de la estufa
+         Pwm = Pr;         // la igualamos a esta (habria que colocar una estufa de más potencia).
+         digitalWrite (6,HIGH); // Saturamos
+     }
+     else {
+       digitalWrite (6,LOW); // Saturacion a cero
+     }   
+       
+     if (Pwm<0){
+       Pwm=0;
+       }
+       
+   outputPWM = map(Pwm, 0, Pr, 0, 255);   //mapeamos los valores para la salida de PWM
+   analogWrite(analogOutPin, outputPWM);  // escribimos en el salida del PWM
+      
+    
+ // IMPRIME EN LA PANTALLA TFT 1,77" (No imprime todos los valores para no parpadear tanto)
+    a = a + 1;
+    if (a == 1) {
+      pantalla (realPower, Pwm, Irms);
+      borra_p = realPower;
+      borra_v = Pwm;
+      borra_i = Irms;
+    }
+    if (a == 5) {
+      //delay (250);
+      borra (borra_p, borra_v, borra_i);
+      a = 0;
+    } 
+    
+   /*
+  //IMPRIME EN EL PUERTO SERIE DEL ORDENADOR
+  Serial.print("  a:");
+  Serial.print(a);
+  Serial.print("  PW:");
+  Serial.print(realPower);
+  Serial.print("  Pa:");
+  Serial.print(apparentPower);
+  Serial.print("  V:");
+  Serial.print(Vrms);
+  Serial.print("  I:");
+  Serial.print(Irms);
+  Serial.print("  Fac.Potencia:");
+  Serial.print(powerFactor);
+  Serial.print("  Pr:");
+  Serial.print(Pr);
+  Serial.print(" outputPWM:");
+  Serial.print(outputPWM);
+  Serial.print("  Pwm:");
+  Serial.println(Pwm); 
+  */
+  } // final del Void loop()
+  
+  // *** SUBPROGRAMAS
+  //******ESCRIBIR EN LA PANTALLA*************************
+  void pantalla (float realPower, float Pwm, float Irms) {
+    // imprimir Potencia Real, Pwm
+    String PotReal = String(realPower);
+    PotReal = PotReal + "W";
+    String V = String(Pwm);
+    V = V + " PWM";
+    String I = String(Irms);
+    I = I + "A";
+    // convertir la lectura a una matriz de caracteres
+    PotReal.toCharArray(PPrintout, 10);
+    V.toCharArray(VPrintout, 10);
+    I.toCharArray(IPrintout, 10);
+    // set the font color
+    TFTscreen.stroke(255, 255, 255);
+    // print the sensor value
+    TFTscreen.text(PPrintout, 0, 20);
+    TFTscreen.text(VPrintout, 0, 60);
+    TFTscreen.text(IPrintout, 0, 100);
+  }
+  
+  //******BORRAR LA PANTALLA*************************
+  void borra (float borra_p, float borra_v, float borra_i) {
+    String borra_p2 = String(borra_p);
+    borra_p2 = borra_p2 + "W";
+    String borra_v2 = String(borra_v);
+    borra_v2 = borra_v2 + " PWM";
+    String borra_i2 = String(borra_i);
+    borra_i2 = borra_i2 + "A";
+    // convertir la lectura a una matriz de caracteres
+    borra_p2.toCharArray(PPrintout, 10);
+    borra_v2.toCharArray(VPrintout, 10);
+    borra_i2.toCharArray(IPrintout, 10);
+    // borrar el texto que acaba de escribir
+    TFTscreen.stroke(0, 0, 0);
+    TFTscreen.text(PPrintout, 0, 20);
+    TFTscreen.text(VPrintout, 0, 60);
+    TFTscreen.text(IPrintout, 0, 100);
+  }
+  
+
