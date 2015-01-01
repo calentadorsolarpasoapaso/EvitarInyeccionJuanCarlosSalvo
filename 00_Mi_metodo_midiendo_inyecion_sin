@@ -5,37 +5,57 @@
   #include <SPI.h>
   EnergyMonitor emon1;     // Create an instance
   
-  // pin definition for the Uno
+  // pin definition for the Uno  pantalla TFT
   #define cs   10
   #define dc   9
   #define rst  8
-  
   // create an instance of the library
   TFT TFTscreen = TFT(cs, dc, rst);
   
   // matriz de caracteres a imprimir a la pantalla
-  char PPrintout[10];
-  char VPrintout[10];
-  char IPrintout[10];
-  float realPower;
+  char PrPrintout[14];
+  char PWPrintout[14];
+  char IrPrintout[14];
+  char VrPrintout[14]; 
+  char PfPrintout[14];
+  char EePrintout[14];
+  char EiPrintout[14];
+  
   long a = 0; //  para imprimir en pantalla cada cierto tiempo
-  long cont_rele=1001; //definir contador de tiempo del rele
-  float borra_p; // para borrar el la pontecia escrita
-  float borra_v;
+  long cont_rele=101; //definir contador de tiempo del rele
+  float borra_p; // para borrar el la pontecia escrita en pantalla TFT
+  float borra_w;
   float borra_i;
+  float borra_v;
+  float borra_f;
+  float borra_Ee; 
+  float borra_Ei;
   
+  //VARIABLES DE EMOND
+    float realPower=1;        // Real Power into variable
+    float apparentPower;    // Apparent Power into variable
+    float powerFactor;      // Power Factor into Variable
+    float Vrms;             // Vrms into Variable
+    float Irms;             // Irms into Variable
+         
   //REGULACION DE POTENCIA
-  //const int analogInPin = A0;  // Analog input pin that the potentiometer is attached to
-  const int analogOutPin = 3; // Analog output pin para el PWM
-  
-  //int sensorValue = 0;      // value read from the pot
-  int outputPWM = 0;        // value output to the PWM (analog out)
-  float resistencia = 84.6;     // Resistencia de la estufa 84,6 Ohomios
+  //const int analogOutPin = 3;   // Analog output pin para el PWM
+  int outputPWM = 0;            // value output to the PWM (analog out)
+  float resistencia = 120;     // Resistencia de la estufa 120 Ohomios
   float Pc = 0;                 // diferencia entre potencia medidad
   float Pr=230*230/resistencia; // potencia de la estufa inicial
   float Pwm=0;                // potencia a disipar
+  int reset=0;
+    
+  //variables para el calculo de la Energia importa y exportada
+  unsigned long T, T1, T2;
+  float Eimpcal=0; // Energia para almacenar para no desbordar los decimales
+  float Eexpcal=0;
+  float Eimp=0;  // Energia a para imprimir en W
+  float Eexp=0;
   
-  void setup()
+    
+void setup()
   {
    pinMode(2,OUTPUT);  // Conecta Rele de tensión
    pinMode(5,OUTPUT);  // enciende Led de inyección y compensación
@@ -60,36 +80,41 @@
     // Serial.begin(9600); // iniciar puerto serie
   
     // CALIBRAR LAS LECTURAS DE TENSIÓN DE INTENSIDAD
-    emon1.voltage(2, 274, 1); // Voltage: input pin, calibration, phase_shift
-    emon1.current(1, 22.27);      // Current: input pin, calibration.
+    emon1.voltage(2, 274, 1); // Voltage: input pin, calibration, phase_shift (calibrar con regla de 3)
+    emon1.current(1, 24);      // Current: input pin, calibration. (ajustar a intensidades bajas)
   
     // INICIAR LA PANTALLA TFT
-    // Ponga esta línea al principio de cada dibujo que utiliza el GLCD:
     TFTscreen.begin();
     // borrar la pantalla con un fondo negro
     TFTscreen.background(0, 0, 0);
-    // Escribir el texto estático a la pantalla
     // Establecer el color de fuente a blanco
     TFTscreen.stroke(255, 255, 255);
     // set the font size
-    TFTscreen.setTextSize(2);
+    //TFTscreen.setTextSize(2);
     // write the text to the top left corner of the screen
-    TFTscreen.text("Medicion :\n ", 0, 0);
+    //TFTscreen.text("Medicion :\n ", 0, 0);   // Escribir el texto estático a la pantalla
     // establece el tamaño de fuente muy grande para el bucle
-    TFTscreen.setTextSize(3);
+    TFTscreen.setTextSize(2);
   }
   
   void loop()
   {
+    
+   T1=millis(); //tomo tiempo 1 para calculo de la energía
+    
  // CALCULO DELA POTENCIA
     emon1.calcVI(20, 1000); // Calculate all. No.of half wavelengths (crossings), time-out
     //emon1.serialprint();   // Print out all variables (realpower, apparent power, Vrms, Irms, power factor)
-    float realPower       = emon1.realPower;        //extract Real Power into variable
-    float apparentPower   = emon1.apparentPower;    //extract Apparent Power into variable
-    float powerFactor     = emon1.powerFactor;      //extract Power Factor into Variable
-    float Vrms            = emon1.Vrms;             //extract Vrms into Variable
-    float Irms            = emon1.Irms;             //extract Irms into Variable
+    realPower       = emon1.realPower;        //extract Real Power into variable
+    apparentPower   = emon1.apparentPower;    //extract Apparent Power into variable
+    powerFactor     = emon1.powerFactor;      //extract Power Factor into Variable
+    Vrms            = emon1.Vrms;             //extract Vrms into Variable
+    Irms            = emon1.Irms;             //extract Irms into Variable
   
+  if (reset<6){  //para evitar que mida potencias erroneas al arranque
+    realPower=0;
+    reset=reset+1;
+    }
      
  //REGULACION DE POTENCIA
     Pr = Vrms * Vrms / resistencia; // potencia máxima de la estufa
@@ -121,10 +146,10 @@
     
      if (Pwm > Pr){       // si la potencia que vamos a enviar es mayor que la de la estufa
          Pwm = Pr;         // la igualamos a esta (habria que colocar una estufa de más potencia).
-         digitalWrite (6,HIGH); // Saturamos
+         digitalWrite (6,HIGH); // Saturamos Led rojo
      }
      else {
-       digitalWrite (6,LOW); // Saturacion a cero
+       digitalWrite (6,LOW); // No Saturacion la máxima potencia de la estufa
      }   
        
      if (Pwm<0){
@@ -132,21 +157,41 @@
        }
        
    outputPWM = map(Pwm, 0, Pr, 0, 255);   //mapeamos los valores para la salida de PWM
-   analogWrite(analogOutPin, outputPWM);  // escribimos en el salida del PWM
-      
+   analogWrite(3, outputPWM);  // escribimos en el salida 3 del PWM
+     
+   // Sumatorio de la Energía  
+   T2=millis();
+   T=(T2-T1);        // 1/1000 para pasar de milis a segundos, no lo hago para no desbordar decimales, se hace al final
+   if (T<0){T=T2;}
+   if (realPower<0){Eexpcal=Eexpcal+realPower*T/3600;}   // para pasar de segundos a horas /3600 y a W
+   else {Eimpcal=Eimpcal+realPower*T/3600;}
+   Eexp=Eexpcal/1000; //para imprimir la Energía en W/h
+   Eimp=Eimpcal/1000;
     
- // IMPRIME EN LA PANTALLA TFT 1,77" (No imprime todos los valores para no parpadear tanto)
+ // IMPRIME EN LA PANTALLA TFT 1,77" (No imprimo todos los valores para no parpadear tanto)
     a = a + 1;
-    if (a == 1) {
-      pantalla (realPower, Pwm, Irms);
+    if (a == 1) { // imprime solo la primera vez
+      pantalla (realPower, Pwm, Irms,Vrms,powerFactor,Eexp,Eimp);
       borra_p = realPower;
-      borra_v = Pwm;
+      borra_w = Pwm;
       borra_i = Irms;
+      borra_v = Vrms;
+      borra_f = powerFactor;
+      borra_Ee = Eexp;
+      borra_Ei = Eimp;
     }
-    if (a == 5) {
-      //delay (250);
-      borra (borra_p, borra_v, borra_i);
-      a = 0;
+    if (a == 6) {   // imprime uno de cada 5
+      borra (borra_p, borra_w, borra_i,borra_v,borra_f,borra_Ee,borra_Ei);
+      pantalla (realPower, Pwm, Irms,Vrms,powerFactor,Eexp, Eimp);
+      borra_p = realPower;
+      borra_w = Pwm;
+      borra_i = Irms;
+      borra_v = Vrms;
+      borra_f = powerFactor;
+      borra_Ee = Eexp;
+      borra_Ei = Eimp;      
+      
+      a = 1;
     } 
     
    /*
@@ -172,30 +217,61 @@
   */
   } // final del Void loop()
   
-  // *** SUBPROGRAMAS
+   // *** SUBPROGRAMAS
   //******ESCRIBIR EN LA PANTALLA*************************
-  void pantalla (float realPower, float Pwm, float Irms) {
+  void pantalla (float realPower, float Pwm, float Irms, float Vrms, float powerFactor, float Eexp, float Eimp) {
+   
     // imprimir Potencia Real, Pwm
-    String PotReal = String(realPower);
-    PotReal = PotReal + "W";
-    String V = String(Pwm);
-    V = V + " PWM";
-    String I = String(Irms);
-    I = I + "A";
+    String PotReal = String(realPower)+" W";
+    String PW = String(Pwm)+ " PWM";
+    String Ir = String(Irms)+" A";
+    String Vr = String(Vrms)+" V";
+    String Pf = String(powerFactor)+" cosFi";
+    String Ee = String(Eexp)+" W/h"; 
+    String Ei = String(Eimp)+" W/h";
+    
     // convertir la lectura a una matriz de caracteres
-    PotReal.toCharArray(PPrintout, 10);
-    V.toCharArray(VPrintout, 10);
-    I.toCharArray(IPrintout, 10);
+    PotReal.toCharArray(PrPrintout, 14);
+    PW.toCharArray(PWPrintout, 14);
+    Ir.toCharArray(IrPrintout, 14);
+    Vr.toCharArray(VrPrintout, 14);  
+    Pf.toCharArray(PfPrintout, 14);  
+    Ee.toCharArray(EePrintout, 14);  
+    Ei.toCharArray(EiPrintout, 14); 
+    
     // set the font color
     TFTscreen.stroke(255, 255, 255);
     // print the sensor value
-    TFTscreen.text(PPrintout, 0, 20);
-    TFTscreen.text(VPrintout, 0, 60);
-    TFTscreen.text(IPrintout, 0, 100);
-  }
+    TFTscreen.text(PrPrintout, 0, 0);
+    TFTscreen.text(PWPrintout, 0, 19);
+    TFTscreen.text(IrPrintout, 0, 38);
+    TFTscreen.text(VrPrintout, 0, 57);
+    TFTscreen.text(PfPrintout, 0, 76);
+    TFTscreen.text(EePrintout, 0, 95);
+    TFTscreen.text(EiPrintout, 0, 114);
+   }
   
   //******BORRAR LA PANTALLA*************************
-  void borra (float borra_p, float borra_v, float borra_i) {
+  void borra (float borra_p, float borra_w, float borra_i, float borra_v, float borra_f, float borra_Ee, float borra_Ei) {
+   
+    String PotReal = String(borra_p)+" W";
+    String PW = String(borra_w)+ " PWM";
+    String Ir = String(borra_i)+" A";
+    String Vr = String(borra_v)+" V";
+    String Pf = String(borra_f)+" cosFi";
+    String Ee = String(borra_Ee)+" W/h"; 
+    String Ei = String(borra_Ei)+" W/h"; 
+    
+    // convertir la lectura a una matriz de caracteres
+    PotReal.toCharArray(PrPrintout, 14);
+    PW.toCharArray(PWPrintout, 14);
+    Ir.toCharArray(IrPrintout, 14);
+    Vr.toCharArray(VrPrintout, 14);  
+    Pf.toCharArray(PfPrintout, 14);  
+    Ee.toCharArray(EePrintout, 14);  
+    Ei.toCharArray(EiPrintout, 14); 
+    
+    /*
     String borra_p2 = String(borra_p);
     borra_p2 = borra_p2 + "W";
     String borra_v2 = String(borra_v);
@@ -206,11 +282,16 @@
     borra_p2.toCharArray(PPrintout, 10);
     borra_v2.toCharArray(VPrintout, 10);
     borra_i2.toCharArray(IPrintout, 10);
+   */ 
+    
     // borrar el texto que acaba de escribir
     TFTscreen.stroke(0, 0, 0);
-    TFTscreen.text(PPrintout, 0, 20);
-    TFTscreen.text(VPrintout, 0, 60);
-    TFTscreen.text(IPrintout, 0, 100);
+    TFTscreen.text(PrPrintout, 0, 0);
+    TFTscreen.text(PWPrintout, 0, 19);
+    TFTscreen.text(IrPrintout, 0, 38);
+    TFTscreen.text(VrPrintout, 0, 57);
+    TFTscreen.text(PfPrintout, 0, 76);
+    TFTscreen.text(EePrintout, 0, 95);
+    TFTscreen.text(EiPrintout, 0, 114);
   }
   
-
